@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Editor Mermaid — Diagramas de Sequência</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ─── Header ──────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🧜</div>
+      <h1>Editor <span>Mermaid</span></h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" id="btn-example" title="Carregar exemplo">
+        💡 Exemplo
+      </button>
+      <button class="btn btn-secondary" id="btn-copy" title="Copiar código">
+        📋 Copiar
+      </button>
+      <button class="btn btn-primary" id="btn-download" title="Baixar diagrama como SVG">
+        ⬇ Baixar SVG
+      </button>
+      <button class="toggle-btn" id="btn-theme" title="Alternar tema do preview">🌙</button>
+    </div>
+  </header>
+
+  <!-- ─── Main ─────────────────────────────────────────────── -->
+  <main>
+    <!-- Editor pane -->
+    <section class="pane" id="editor-pane" style="flex:1">
+      <div class="pane-header">
+        <span>Código Mermaid</span>
+        <span class="status ok" id="editor-status">✓ pronto</span>
+      </div>
+      <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off"
+        placeholder="Digite seu diagrama de sequência aqui..."></textarea>
+    </section>
+
+    <!-- Resizable divider -->
+    <div class="divider" id="divider"></div>
+
+    <!-- Preview pane -->
+    <section class="pane" id="preview-pane-wrapper" style="flex:1">
+      <div class="pane-header">
+        <span>Preview</span>
+        <span class="status ok" id="preview-status">✓ renderizado</span>
+      </div>
+      <div id="preview-pane">
+        <div id="diagram"></div>
+        <pre id="error-box"></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- ─── Footer ───────────────────────────────────────────── -->
+  <footer>
+    <span>Editor Mermaid — Diagramas de Sequência</span>
+    <span>Powered by <a href="https://mermaid.js.org" target="_blank" rel="noopener">Mermaid.js</a></span>
+  </footer>
+
+  <!-- Toast -->
+  <div id="toast">Copiado!</div>
+
+  <!-- Mermaid.js (CDN) -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+    // ─── Default example ──────────────────────────────────────
+    const DEFAULT_CODE = `sequenceDiagram
+    autonumber
+    actor Usuario as Usuário
+    participant Frontend
+    participant Backend
+    participant Banco as Banco de Dados
+
+    Usuario->>Frontend: Preenche formulário de login
+    Frontend->>Backend: POST /api/login {email, senha}
+    activate Backend
+
+    Backend->>Banco: SELECT * FROM users WHERE email = ?
+    activate Banco
+    Banco-->>Backend: Retorna dados do usuário
+    deactivate Banco
+
+    alt Credenciais válidas
+        Backend-->>Frontend: 200 OK { token JWT }
+        Frontend-->>Usuario: Redireciona para Dashboard
+    else Credenciais inválidas
+        Backend-->>Frontend: 401 Unauthorized
+        Frontend-->>Usuario: Exibe mensagem de erro
+    end
+
+    deactivate Backend`;
+
+    // ─── State ────────────────────────────────────────────────
+    let darkPreview = false;
+    let renderTimer = null;
+    let lastSvg = '';
+
+    // ─── Elements ─────────────────────────────────────────────
+    const editor        = document.getElementById('editor');
+    const diagram       = document.getElementById('diagram');
+    const errorBox      = document.getElementById('error-box');
+    const previewPane   = document.getElementById('preview-pane');
+    const editorStatus  = document.getElementById('editor-status');
+    const previewStatus = document.getElementById('preview-status');
+    const toast         = document.getElementById('toast');
+
+    // ─── Mermaid init ─────────────────────────────────────────
+    function initMermaid(theme = 'default') {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme,
+        sequence: {
+          diagramMarginX: 30,
+          diagramMarginY: 20,
+          actorMargin: 80,
+          width: 150,
+          height: 65,
+          boxMargin: 10,
+          boxTextMargin: 5,
+          noteMargin: 10,
+          messageMargin: 35,
+          mirrorActors: true,
+          useMaxWidth: true,
+        },
+      });
+    }
+
+    // ─── Render ───────────────────────────────────────────────
+    async function render(code) {
+      try {
+        diagram.removeAttribute('data-processed');
+        diagram.innerHTML = '';
+        errorBox.style.display = 'none';
+
+        const uniqueId = 'mermaid-' + Date.now();
+        const { svg } = await mermaid.render(uniqueId, code.trim());
+        lastSvg = svg;
+        diagram.innerHTML = svg;
+
+        editorStatus.textContent  = '✓ válido';
+        editorStatus.className    = 'status ok';
+        previewStatus.textContent = '✓ renderizado';
+        previewStatus.className   = 'status ok';
+      } catch (err) {
+        lastSvg = '';
+        diagram.innerHTML = '';
+        errorBox.style.display = 'block';
+        errorBox.textContent   = String(err.message || err);
+        editorStatus.textContent  = '✗ erro de sintaxe';
+        editorStatus.className    = 'status error';
+        previewStatus.textContent = '✗ erro';
+        previewStatus.className   = 'status error';
+      }
+    }
+
+    function scheduleRender() {
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(() => render(editor.value), 350);
+    }
+
+    // ─── Drag-to-resize divider ───────────────────────────────
+    const divider     = document.getElementById('divider');
+    const editorPane  = document.getElementById('editor-pane');
+    const previewWrap = document.getElementById('preview-pane-wrapper');
+
+    divider.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      divider.classList.add('dragging');
+      const container = divider.parentElement;
+      const totalW    = container.clientWidth - divider.offsetWidth;
+
+      const onMove = (ev) => {
+        const rect = container.getBoundingClientRect();
+        let ratio   = (ev.clientX - rect.left) / totalW;
+        ratio = Math.max(0.15, Math.min(0.85, ratio));
+        editorPane.style.flex  = `0 0 ${ratio * 100}%`;
+        previewWrap.style.flex = `0 0 ${(1 - ratio) * 100}%`;
+      };
+
+      const onUp = () => {
+        divider.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // ─── Theme toggle ─────────────────────────────────────────
+    const btnTheme = document.getElementById('btn-theme');
+    btnTheme.addEventListener('click', () => {
+      darkPreview = !darkPreview;
+      previewPane.classList.toggle('dark', darkPreview);
+      btnTheme.textContent = darkPreview ? '☀' : '🌙';
+      initMermaid(darkPreview ? 'dark' : 'default');
+      render(editor.value);
+    });
+
+    // ─── Copy ─────────────────────────────────────────────────
+    document.getElementById('btn-copy').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(editor.value);
+        showToast('Copiado!');
+      } catch {
+        // fallback
+        editor.select();
+        document.execCommand('copy');
+        showToast('Copiado!');
+      }
+    });
+
+    // ─── Download SVG ─────────────────────────────────────────
+    document.getElementById('btn-download').addEventListener('click', () => {
+      if (!lastSvg) { showToast('Nenhum diagrama para baixar.'); return; }
+      const blob = new Blob([lastSvg], { type: 'image/svg+xml' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'diagrama.svg';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // ─── Load example ─────────────────────────────────────────
+    document.getElementById('btn-example').addEventListener('click', () => {
+      editor.value = DEFAULT_CODE;
+      scheduleRender();
+      showToast('Exemplo carregado!');
+    });
+
+    // ─── Toast helper ─────────────────────────────────────────
+    let toastTimer;
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    // ─── Tab key support ──────────────────────────────────────
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = editor.selectionStart;
+        const end   = editor.selectionEnd;
+        editor.value = editor.value.substring(0, start) + '    ' + editor.value.substring(end);
+        editor.selectionStart = editor.selectionEnd = start + 4;
+        scheduleRender();
+      }
+    });
+
+    // ─── Editor input ─────────────────────────────────────────
+    editor.addEventListener('input', scheduleRender);
+
+    // ─── Persist to localStorage ──────────────────────────────
+    const STORAGE_KEY = 'mermaid-editor-code';
+
+    editor.addEventListener('input', () => {
+      try { localStorage.setItem(STORAGE_KEY, editor.value); } catch {}
+    });
+
+    function loadSaved() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved || DEFAULT_CODE;
+      } catch {
+        return DEFAULT_CODE;
+      }
+    }
+
+    // ─── Bootstrap ────────────────────────────────────────────
+    initMermaid('default');
+    editor.value = loadSaved();
+    render(editor.value);
+  </script>
+</body>
+</html>
