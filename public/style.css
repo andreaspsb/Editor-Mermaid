@@ -189,7 +189,16 @@ main {
 }
 
 #diagram {
-  max-width: 100%;
+  width: 100%;
+  min-width: 600px;
+  display: flex;
+  justify-content: center;
+}
+
+#diagram svg {
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
 }
 
 /* Error overlay */
